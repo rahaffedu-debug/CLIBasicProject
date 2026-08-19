@@ -25,6 +25,7 @@ def deleteTask(taskId):
             return
     print("Task deleted")
 
+#main function
 def main():
     while True:
         print("Welcome to the Task Manager:")
