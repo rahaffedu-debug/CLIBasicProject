@@ -1,94 +1,64 @@
 class Task:
-    def __init__(self, task_id, description, completed):
+    def __init__(self, task_id, description, completed=False):
         self.task_id = task_id
         self.description = description
         self.completed = completed
+
+    def mark_completed(self):
+        self.completed = True
+
+    def mark_pending(self):
+        self.completed = False
 
 class TaskManager:
     def __init__(self):
         self.tasks = []
         self.task_number = 0
 
-    def add_task(self):
-        description = input("Add new task: ").strip()
-
-        if not description:
-            print("Task description cannot be empty")
-            return
-
+    def add_task(self, description):
         self.task_number += 1
-
-        new_task = Task (
-            self.task_number,
-            description,
-            completed = False
-        )
-
+        new_task = Task(self.task_number, description)
         self.tasks.append(new_task)
-        print("Task added")
+
+    def find_task(self, task_id):
+        for task in self.tasks:
+            if task.task_id == task_id:
+                return task
+        return None
 
     def list_tasks(self):
-        if not self.tasks:
-            print("No tasks found")
-            return
+        return self.tasks
 
-        for task in self.tasks:
-            status = "completed" if task.completed else "Pending"
-            print(
-                f"task number: {task.task_id}, "
-                f"description: {task.description}, "
-                f"status: {status}"
-            )
-        print(" ")
+    def update_task_status(self, task_id, status):
+        task = self.find_task(task_id)
+        if task is None:
+            return False
 
-    def update_task_status(self):
-        task_id = input("Enter task id: ").strip()
+        if status == "completed":
+            task.mark_completed()
+        else:
+            task.mark_pending()
+        return True
 
-        if not task_id.isdigit():
-            print("please enter a valid task id")
-            return
-        task_id = int(task_id)
+    def delete_task(self, task_id):
+        task = self.find_task(task_id)
+        if task is None:
+            return False
+        self.tasks.remove(task)
+        return True
 
-        for task in self.tasks:
-            if task.task_id == task_id:
-                status = input("enter status (completed/pending): ").strip().lower()
-
-                if status == "completed":
-                    task.completed = True
-                    print("Task marked as completed")
-                    return
-
-                elif status == "pending":
-                    task.completed = False
-                    print("Task marked as pending")
-                    return
-
-                else:
-                    print("Invalid status. Please choose either 'completed' or 'pending")
-                    return
-        print("Task not found")
-
-    def delete_task(self):
-        task_id = input("Enter task id: ").strip()
-        if not task_id.isdigit():
-            print("please enter a valid task id")
-            return
-        task_id = int(task_id)
-
-        for task in self.tasks:
-            if task.task_id == task_id:
-                self.tasks.remove(task)
-                print("Task deleted\n")
-                return
-        print("Task not found")
-
-class Main():
+class TaskManagerApp:
     def __init__(self):
         self.manager = TaskManager()
+        self.menu_actions = {
+            "1": self.handle_add_task,
+            "2": self.handle_list_tasks,
+            "3": self.handle_delete_task,
+            "4": self.handle_update_status,
+        }
 
     def start(self):
         print("Welcome to the Task Manager:")
-
         while True:
             print("1. Add new task")
             print("2. List all tasks")
@@ -96,28 +66,83 @@ class Main():
             print("4. Update task status")
             print("5. Exit")
 
-            choice = input("choose an option: ").strip()
+            choice = input("Choose an option: ").strip()
 
-            if choice == "1":
-                self.manager.add_task()
-
-            elif choice == "2":
-                self.manager.list_tasks()
-
-            elif choice == "3":
-                self.manager.delete_task()
-
-            elif choice == "4":
-                self.manager.update_task_status()
-
-            elif choice == "5":
+            if choice == "5":
                 print("Goodbye!")
                 break
 
+            action = self.menu_actions.get(choice)
+            if action:
+                action()
             else:
                 print("Invalid option, please try again")
 
+    def handle_add_task(self):
+        description = input("Add new task: ").strip()
+        if not description:
+            print("Task description cannot be empty")
+            return
+
+        self.manager.add_task(description)
+        print("Task added")
+
+    def handle_list_tasks(self):
+        tasks = self.manager.list_tasks()
+
+        if not tasks:
+            print("No tasks found")
+            return
+        for task in tasks:
+            status = "Completed" if task.completed else "Pending"
+            print(
+                f"Task ID: {task.task_id}, "
+                f"Description: {task.description}, "
+                f"Status: {status}"
+            )
+
+    def handle_delete_task(self):
+        if not self.manager.tasks:
+            print("No tasks found")
+            return
+
+        task_id = self.get_valid_task_id()
+        if task_id is None:
+            return
+
+        success = self.manager.delete_task(task_id)
+        if success:
+            print("Task deleted\n")
+        else:
+            print("Task not found")
+
+    def handle_update_status(self):
+        if not self.manager.tasks:
+            print("No tasks found")
+            return
+
+        task_id = self.get_valid_task_id()
+        if task_id is None:
+            return
+
+        status = input("Update status (Completed/Pending): ").strip().lower()
+        if status not in ["completed", "pending"]:
+            print("Invalid status. Please choose either 'Completed' or 'Pending'\n")
+            return
+
+        success = self.manager.update_task_status(task_id, status)
+        if success:
+            print(f"Task status updated to: {status}\n")
+        else:
+            print("Task not found")
+
+    def get_valid_task_id(self):
+        task_id = input("Task ID: ").strip()
+        if not task_id.isdigit() or int(task_id) <= 0:
+            print("Invalid task ID")
+            return None
+        return int(task_id)
 
 if __name__ == "__main__":
-    main = Main()
-    main.start()
+    app = TaskManagerApp()
+    app.start()
