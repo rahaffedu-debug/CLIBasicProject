@@ -13,10 +13,10 @@ class Task:
     def mark_pending(self):
         self.completed = False
 
-    def get_extra_display_info(self):
+    def get_extra_display_info(self, today=None):
         return ""
 
-    def get_warning_message(self):
+    def get_warning_message(self, today=None):
         return None
 
 class DeadlineTask(Task):
@@ -24,17 +24,19 @@ class DeadlineTask(Task):
         super().__init__(task_id, description, completed)
         self.due_date = due_date
 
-    def is_overdue(self):
+    def is_overdue(self, today=None):
         if self.completed:
             return False
-        return date.today() > self.due_date
+        if today is None:
+            today = date.today()
+        return today > self.due_date
 
-    def get_extra_display_info(self):
-        overdue_label = " (OVERDUE)" if self.is_overdue() else ""
+    def get_extra_display_info(self, today=None):
+        overdue_label = " (OVERDUE)" if self.is_overdue(today) else ""
         return f", Due: {self.due_date.isoformat()}{overdue_label}"
 
-    def get_warning_message(self):
-        if self.is_overdue():
+    def get_warning_message(self, today=None):
+        if self.is_overdue(today):
             return f"Warning: '{self.description}' due date is overdue"
         return None
 
@@ -43,20 +45,29 @@ class DeadlineTask(Task):
 #---------- factory method classes -------------
 
 class TaskFactory:
-    def create_task(self,task_id, description, **kwargs):
+    extra_fields = []
+
+    def create_task(self, task_id, description, **kwargs):
         raise NotImplementedError
 
 class NormalTaskFactory(TaskFactory):
+    extra_fields = []
+
     def create_task(self, task_id, description, **kwargs):
         return Task(task_id, description)
 
 class DeadlineTaskFactory(TaskFactory):
+    extra_fields = [
+        {"name": "due_date", "prompt": "Due date (YYYY-MM-DD): ", "parse": date.fromisoformat},
+    ]
     def create_task(self, task_id, description, due_date=None, **kwargs):
+        if due_date is None:
+            raise ValueError("DeadlineTask requires a due date")
         return DeadlineTask(task_id, description, due_date)
 
 #---------------------------------------------
 
-#---------- observer pattern classe ----------
+#---------- observer pattern classes ----------
 class TaskObserver:
     def on_task_added(self, task):
         pass
@@ -64,6 +75,19 @@ class TaskObserver:
         pass
     def on_task_deleted(self, task):
         pass
+
+class TaskLogger(TaskObserver):
+    def __init__(self):
+        self.events = []
+
+    def on_task_added(self, task):
+        self.events.append(f"Added task {task.task_id}")
+
+    def on_task_status_changed(self, task, previous_status):
+        self.events.append(f"Task {task.task_id} status changed from {previous_status}")
+
+    def on_task_deleted(self, task):
+        self.events.append(f"Deleted task {task.task_id}")
 
 #----------------------------------------------
 
@@ -77,24 +101,30 @@ class TaskManager:
         }
         self._observers = []
 
+    def get_factory(self, task_type):
+        factory = self._task_factories.get(task_type)
+        if factory is None:
+            raise ValueError(f"Unknown task type: {task_type}")
+        return factory
+
     def add_observer(self, observer):
         self._observers.append(observer)
 
-    def _notify_task_added(self,task):
+    def _notify_task_added(self, task):
         for observer in self._observers:
             observer.on_task_added(task)
 
-    def _notify_task_status_changed(self,task, previous_status):
+    def _notify_task_status_changed(self, task, previous_status):
         for observer in self._observers:
             observer.on_task_status_changed(task, previous_status)
 
-    def _notify_task_deleted(self,task):
+    def _notify_task_deleted(self, task):
         for observer in self._observers:
             observer.on_task_deleted(task)
 
-    def add_task(self, description, task_type="normal", due_date=None):
-        factory = self._task_factories[task_type]
-        new_task = factory.create_task(self._next_task_id, description, due_date=due_date)
+    def add_task(self, description, task_type="normal", **kwargs):
+        factory = self.get_factory(task_type)
+        new_task = factory.create_task(self._next_task_id, description, **kwargs)
         self._next_task_id += 1
         self.tasks.append(new_task)
         self._notify_task_added(new_task)
@@ -133,7 +163,11 @@ class TaskManager:
 class TaskManagerApp(TaskObserver):
     def __init__(self):
         self.manager = TaskManager()
+        self.logger = TaskLogger()
+
         self.manager.add_observer(self)
+        self.manager.add_observer(self.logger)
+
         self.menu_actions = {
             "1": self.handle_add_task,
             "2": self.handle_list_tasks,
@@ -151,8 +185,8 @@ class TaskManagerApp(TaskObserver):
         self._warn_if_overdue(task)
 
     def on_task_status_changed(self, task, previous_status):
-        status = "Completed" if task.completed else "Pending"
-        print(f"Task status updated to: {status}\n")
+        new_status = "Completed" if task.completed else "Pending"
+        print(f"Task status updated: {previous_status.capitalize()} -> {new_status}\n")
         self._warn_if_overdue(task)
 
     def on_task_deleted(self, task):
@@ -189,13 +223,31 @@ class TaskManagerApp(TaskObserver):
         if task_type is None:
             return
 
-        due_date = None
-        if task_type == "deadline":
-            due_date = self.get_valid_due_date()
-            if due_date is None:
-                return
+        try:
+            factory = self.manager.get_factory(task_type)
+        except ValueError as error:
+            print(f"{error}\n")
+            return
 
-        self.manager.add_task(description, task_type=task_type, due_date=due_date)
+        extra_kwargs = self.collect_extra_fields(factory)
+        if extra_kwargs is None:
+            return
+
+        try:
+            self.manager.add_task(description, task_type=task_type, **extra_kwargs)
+        except ValueError as error:
+            print(f"{error}\n")
+
+    def collect_extra_fields(self, factory):
+        extra_kwargs = {}
+        for field in factory.extra_fields:
+            raw_value = input(field["prompt"]).strip()
+            try:
+                extra_kwargs[field["name"]] = field["parse"](raw_value)
+            except ValueError:
+                print("Invalid input format\n")
+                return None
+        return extra_kwargs
 
     def handle_list_tasks(self):
         tasks = self.manager.list_tasks()
@@ -257,14 +309,6 @@ class TaskManagerApp(TaskObserver):
             print("Invalid task type\n")
             return None
         return task_type
-
-    def get_valid_due_date(self):
-        raw_input = input("Due date (YYYY-MM-DD): ").strip()
-        try:
-            return date.fromisoformat(raw_input)
-        except ValueError:
-            print("Invalid date format. Please use YYYY-MM-DD\n")
-            return None
 
 
 if __name__ == "__main__":
